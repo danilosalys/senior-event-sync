@@ -3,6 +3,7 @@ const seniorQueryService = require('../services/seniorQueryService');
 const eventCreatorService = require('../services/eventCreatorService');
 const seniorUpdateService = require('../services/seniorUpdateService');
 const eventModel = require('../models/eventModel');
+const eventTypeModel = require('../models/eventTypeModel');
 const configManager = require('../config/configManager');
 const logger = require('../utils/logger');
 const { withRetry } = require('../utils/retry');
@@ -25,11 +26,32 @@ async function syncSeniorToAD() {
     isRunning = true;
     logger.info('[Senior→AD] Iniciando sincronização Sênior → AD...');
 
-    // Carregar queries configuradas
-    const queries = queryLoaderService.loadQueries();
-    
+    // Carregar queries dos arquivos
+    let queries = queryLoaderService.loadQueries();
+
+    // Quando useEventTypesFromDatabase=true, filtrar pelos tipos ACTIVE na tabela AD_EVENT_TYPES (ImediatoADSync)
+    const useEventTypesFromDb = configManager.getConfig().service?.useEventTypesFromDatabase !== false;
+    if (useEventTypesFromDb) {
+      try {
+        const activeTypes = await eventTypeModel.getActive();
+        const activeCodes = new Set(
+          (activeTypes || []).map(t => (t.EVENT_TYPE_CODE || '').toUpperCase()).filter(Boolean)
+        );
+        const before = queries.length;
+        queries = queries.filter(q => activeCodes.has((q.EVENT_TYPE_CODE || '').toUpperCase()));
+        if (before !== queries.length) {
+          logger.info(
+            `[Senior→AD] Tipos ativos vindos de AD_EVENT_TYPES: ${activeTypes.length}. Queries a executar: ${queries.length} (${before - queries.length} desativada(s) no banco).`
+          );
+        }
+      } catch (err) {
+        logger.error('[Senior→AD] Erro ao carregar tipos ativos de AD_EVENT_TYPES. Pulando sincronização.', err);
+        return;
+      }
+    }
+
     if (queries.length === 0) {
-      logger.warn('[Senior→AD] Nenhuma query configurada. Pulando sincronização.');
+      logger.warn('[Senior→AD] Nenhuma query a executar (nenhum tipo ativo ou configurado). Pulando sincronização.');
       return;
     }
 
@@ -70,6 +92,8 @@ async function syncSeniorToAD() {
               EVENT_TYPE_CODE: queryConfig.EVENT_TYPE_CODE,
               SENIOR_EMPLOYEE_ID: employeeId || null,
               SENIOR_EMPLOYEE_NAME: employeeName || null,
+              SENIOR_COST_CENTER_CODE: row.SENIOR_COST_CENTER_CODE || null,
+              SENIOR_COST_CENTER_DESCRIPTION: row.SENIOR_COST_CENTER_DESCRIPTION || null,
               AD_ATTRIBUTE_VALUE: row.NEW_VALUE || row.AD_ATTRIBUTE_VALUE || null,
               CREATED_BY: 'senior-event-sync'
             });

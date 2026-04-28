@@ -1,9 +1,12 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+
 const dbConfig = require('../src/config/dbConfig');
 const seniorDbConfig = require('../src/config/seniorDbConfig');
 const logger = require('../src/utils/logger');
 
 async function testConnection(name, config) {
-  const { pool, poolConnect } = config;
+  const { pool, poolConnect, sql } = config;
 
   try {
     logger.info(`Testando conexão com o banco "${name}"...`);
@@ -12,7 +15,7 @@ async function testConnection(name, config) {
     await poolConnect;
 
     // Executa uma query simples para validar a conexão
-    const request = pool.request();
+    const request = new sql.Request(pool);
     await request.query('SELECT 1 AS test');
 
     logger.info(`Conexão com o banco "${name}" OK.`);

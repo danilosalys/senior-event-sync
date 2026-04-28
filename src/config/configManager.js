@@ -1,4 +1,4 @@
-require('dotenv').config();
+// dotenv deve ser carregado no app.js antes de qualquer require que use process.env
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
@@ -28,7 +28,14 @@ const defaultConfig = {
     cronADToSenior: process.env.CRON_AD_TO_SENIOR || '*/2 * * * *',
     maxRetries: parseInt(process.env.MAX_RETRIES, 10) || 3,
     retryDelay: parseInt(process.env.RETRY_DELAY, 10) || 5000,
-    maxEventsPerRun: parseInt(process.env.MAX_EVENTS_PER_RUN, 10) || 100
+    maxEventsPerRun: parseInt(process.env.MAX_EVENTS_PER_RUN, 10) || 100,
+    // Se true (padrão), usa a tabela AD_EVENT_TYPES (STATUS='ACTIVE') do banco ImediatoADSync para definir quais eventos processar.
+    // Se false, usa ENABLED_EVENT_TYPES do .env (quando definido) ou todos os tipos com query definida.
+    useEventTypesFromDatabase: process.env.USE_EVENT_TYPES_FROM_DATABASE !== 'false',
+    // Tipos de evento (usado só quando useEventTypesFromDatabase=false). Lista separada por vírgula.
+    enabledEventTypes: process.env.ENABLED_EVENT_TYPES
+      ? process.env.ENABLED_EVENT_TYPES.split(',').map(s => s.trim()).filter(Boolean)
+      : []
   },
   logs: {
     retention: '1 week',
@@ -38,7 +45,8 @@ const defaultConfig = {
   },
   api: {
     port: parseInt(process.env.API_PORT, 10) || 3001,
-    enableApi: process.env.API_ENABLED === 'true' || true
+    // API_ENABLED=false desabilita; ausência ou true habilita (padrão: habilitada)
+    enableApi: process.env.API_ENABLED !== 'false'
   }
 };
 

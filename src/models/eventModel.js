@@ -1,10 +1,10 @@
-const { pool, sql } = require('../config/dbConfig');
+const dbConfig = require('../config/dbConfig');
 
 async function hasPendingEvent(username, eventTypeCode) {
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   const result = await request
-    .input('USERNAME', sql.VarChar(255), username)
-    .input('EVENT_TYPE_CODE', sql.VarChar(50), eventTypeCode)
+    .input('USERNAME', dbConfig.sql.VarChar(255), username)
+    .input('EVENT_TYPE_CODE', dbConfig.sql.VarChar(50), eventTypeCode)
     .query(`
       SELECT COUNT(*) as TOTAL
       FROM AD_EVENTS e
@@ -22,10 +22,10 @@ async function hasPendingEvent(username, eventTypeCode) {
  */
 async function hasPendingEventByEmployeeId(seniorEmployeeId, eventTypeCode) {
   if (!seniorEmployeeId || !eventTypeCode) return false;
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   const result = await request
-    .input('SENIOR_EMPLOYEE_ID', sql.VarChar(50), seniorEmployeeId)
-    .input('EVENT_TYPE_CODE', sql.VarChar(50), eventTypeCode)
+    .input('SENIOR_EMPLOYEE_ID', dbConfig.sql.VarChar(50), seniorEmployeeId)
+    .input('EVENT_TYPE_CODE', dbConfig.sql.VarChar(50), eventTypeCode)
     .query(`
       SELECT COUNT(*) as TOTAL
       FROM AD_EVENTS e
@@ -42,7 +42,7 @@ async function hasPendingEventByEmployeeId(seniorEmployeeId, eventTypeCode) {
  * @param {number} [limit] - Limite de registros (ex.: maxEventsPerRun). Se omitido, retorna todos.
  */
 async function getCompletedEmailEvents(limit) {
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   const hasLimit = typeof limit === 'number' && limit > 0;
   const query = hasLimit
     ? `
@@ -80,16 +80,16 @@ async function getCompletedEmailEvents(limit) {
     ORDER BY e.PROCESSED_AT ASC
   `;
   if (hasLimit) {
-    request.input('limit', sql.Int, limit);
+    request.input('limit', dbConfig.sql.Int, limit);
   }
   const result = await request.query(query);
   return result.recordset;
 }
 
 async function markAsSyncedToSenior(eventId) {
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   await request
-    .input('ID', sql.Int, eventId)
+    .input('ID', dbConfig.sql.Int, eventId)
     .query(`
       UPDATE AD_EVENTS 
       SET SYNCED_TO_SENIOR = 1
@@ -98,25 +98,27 @@ async function markAsSyncedToSenior(eventId) {
 }
 
 async function create(eventData) {
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   try {
     // Se não tiver username, status será AWAITING_USERNAME
     const status = eventData.USERNAME ? (eventData.STATUS || 'PENDING') : 'AWAITING_USERNAME';
     
     const result = await request
-      .input('EVENT_TYPE_ID', sql.Int, eventData.EVENT_TYPE_ID)
-      .input('SENIOR_EMPLOYEE_ID', sql.VarChar(50), eventData.SENIOR_EMPLOYEE_ID || eventData.SENIOR_MATRICULA || null)
-      .input('SENIOR_EMPLOYEE_NAME', sql.VarChar(255), eventData.SENIOR_EMPLOYEE_NAME || eventData.SENIOR_NOME_FUNCIONARIO || null)
-      .input('USERNAME', sql.VarChar(255), eventData.USERNAME || null)
-      .input('AD_ATTRIBUTE_VALUE', sql.VarChar(sql.MAX), eventData.AD_ATTRIBUTE_VALUE || eventData.NEW_VALUE || null)
-      .input('CREATED_BY', sql.VarChar(100), eventData.CREATED_BY)
-      .input('AD_ORIGINAL_DATA', sql.VarChar(sql.MAX), eventData.AD_ORIGINAL_DATA || null)
-      .input('STATUS', sql.VarChar(20), status)
+      .input('EVENT_TYPE_ID', dbConfig.sql.Int, eventData.EVENT_TYPE_ID)
+      .input('SENIOR_EMPLOYEE_ID', dbConfig.sql.VarChar(50), eventData.SENIOR_EMPLOYEE_ID || eventData.SENIOR_MATRICULA || null)
+      .input('SENIOR_EMPLOYEE_NAME', dbConfig.sql.VarChar(255), eventData.SENIOR_EMPLOYEE_NAME || eventData.SENIOR_NOME_FUNCIONARIO || null)
+      .input('SENIOR_COST_CENTER_CODE', dbConfig.sql.VarChar(50), eventData.SENIOR_COST_CENTER_CODE || null)
+      .input('SENIOR_COST_CENTER_DESCRIPTION', dbConfig.sql.VarChar(255), eventData.SENIOR_COST_CENTER_DESCRIPTION || null)
+      .input('USERNAME', dbConfig.sql.VarChar(255), eventData.USERNAME || null)
+      .input('AD_ATTRIBUTE_VALUE', dbConfig.sql.VarChar(dbConfig.sql.MAX), eventData.AD_ATTRIBUTE_VALUE || eventData.NEW_VALUE || null)
+      .input('CREATED_BY', dbConfig.sql.VarChar(100), eventData.CREATED_BY)
+      .input('AD_ORIGINAL_DATA', dbConfig.sql.VarChar(dbConfig.sql.MAX), eventData.AD_ORIGINAL_DATA || null)
+      .input('STATUS', dbConfig.sql.VarChar(20), status)
       .query(`
         INSERT INTO AD_EVENTS 
-          (EVENT_TYPE_ID, SENIOR_EMPLOYEE_ID, SENIOR_EMPLOYEE_NAME, USERNAME, AD_ATTRIBUTE_VALUE, CREATED_BY, AD_ORIGINAL_DATA, STATUS)
+          (EVENT_TYPE_ID, SENIOR_EMPLOYEE_ID, SENIOR_EMPLOYEE_NAME, SENIOR_COST_CENTER_CODE, SENIOR_COST_CENTER_DESCRIPTION, USERNAME, AD_ATTRIBUTE_VALUE, CREATED_BY, AD_ORIGINAL_DATA, STATUS)
         OUTPUT INSERTED.ID
-        VALUES (@EVENT_TYPE_ID, @SENIOR_EMPLOYEE_ID, @SENIOR_EMPLOYEE_NAME, @USERNAME, @AD_ATTRIBUTE_VALUE, @CREATED_BY, @AD_ORIGINAL_DATA, @STATUS)
+        VALUES (@EVENT_TYPE_ID, @SENIOR_EMPLOYEE_ID, @SENIOR_EMPLOYEE_NAME, @SENIOR_COST_CENTER_CODE, @SENIOR_COST_CENTER_DESCRIPTION, @USERNAME, @AD_ATTRIBUTE_VALUE, @CREATED_BY, @AD_ORIGINAL_DATA, @STATUS)
       `);
     return result.recordset[0].ID;
   } catch (error) {
@@ -132,9 +134,9 @@ async function create(eventData) {
 }
 
 async function getById(id) {
-  const request = new sql.Request(pool);
+  const request = new dbConfig.sql.Request(dbConfig.pool);
   const result = await request
-    .input('ID', sql.Int, id)
+    .input('ID', dbConfig.sql.Int, id)
     .query(`
       SELECT 
         e.*,

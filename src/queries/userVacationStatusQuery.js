@@ -20,7 +20,6 @@ module.exports = {
       AND f.DATA_FIM >= GETDATE()
       AND f.STATUS = 'PENDENTE'
       AND f.MATRICULA IS NOT NULL
-  `,
-  ENABLED: true
+  `
 };
 

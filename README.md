@@ -18,6 +18,10 @@ Este microserviço possui duas responsabilidades principais:
 - **API REST opcional** para monitoramento
 - **Processamento assíncrono** via cron jobs
 
+## Fluxo férias e reativação
+
+Para o cenário **entrada em férias** (desativar no AD) e **retorno de férias** (reativar no AD), o disparo da reativação fica no **senior-event-sync** (query que detecta retorno no Sênior, ex.: `r034fun.SITAFA = 1`) e a execução no **imediato-ad-sync** (evento `USER_ENABLE`). Detalhes e boas práticas: **[docs/FLUXO_FERIAS_E_REATIVACAO.md](docs/FLUXO_FERIAS_E_REATIVACAO.md)**.
+
 ## Estrutura do Projeto
 
 ```
@@ -54,7 +58,7 @@ copy .env.example .env
 
 3. Configurar queries SQL:
    - Editar ou criar arquivos `.js` na pasta `src/queries/`
-   - Cada query deve exportar um objeto com `EVENT_TYPE_CODE`, `SQL`, `DESCRIPTION` e `ENABLED`
+   - Cada query deve exportar um objeto com `EVENT_TYPE_CODE`, `SQL` e `DESCRIPTION`
 
 4. Instalar como serviço Windows:
 ```bash
@@ -87,7 +91,36 @@ CRON_AD_TO_SENIOR=*/2 * * * *      # A cada 2 minutos
 # API
 API_PORT=3001
 API_ENABLED=true
+
+# Fonte dos tipos de evento (opcional; padrão = banco)
+# USE_EVENT_TYPES_FROM_DATABASE=true   → usa AD_EVENT_TYPES (STATUS=ACTIVE) no ImediatoADSync
+# USE_EVENT_TYPES_FROM_DATABASE=false  → usa ENABLED_EVENT_TYPES (lista abaixo, separada por vírgula)
+# ENABLED_EVENT_TYPES=USER_UPDATE_DISPLAY_NAME,USER_DISABLE_TERMINATION,USER_UPDATE_TITLE,USER_DISABLE_LEAVE
+
+# Opcional
+# LOG_LEVEL=info
+# CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 ```
+
+#### Quais eventos são processados (fonte: banco ImediatoADSync)
+
+Por padrão, o serviço usa a **tabela `AD_EVENT_TYPES`** do banco **ImediatoADSync**: só são executadas as queries cujo `EVENT_TYPE_CODE` existe na tabela com **`STATUS = 'ACTIVE'`**. Assim você ativa ou desativa tipos de evento direto no banco (ou pela API do imediato-ad-sync), sem alterar .env nem arquivos de query.
+
+- **`USE_EVENT_TYPES_FROM_DATABASE=true`** (padrão): tipos ativos vêm de `AD_EVENT_TYPES` (STATUS='ACTIVE').
+- **`USE_EVENT_TYPES_FROM_DATABASE=false`**: usa a lista `ENABLED_EVENT_TYPES` do .env (códigos separados por vírgula); se vazia, todos os tipos com query definida são executados.
+
+**Códigos de tipo** (devem existir em `AD_EVENT_TYPES` e ter uma query em `src/queries/`):
+
+| Código | Descrição |
+|--------|-----------|
+| `USER_UPDATE_DISPLAY_NAME` | Nome de exibição atualizado |
+| `USER_DISABLE_TERMINATION` | Usuários demitidos |
+| `USER_UPDATE_TITLE` | Atualização de cargo |
+| `USER_UPDATE_DESCRIPTION` | Atualização de matrícula (description) |
+| `USER_DISABLE_LEAVE` | Usuários em férias/afastamento (desativar) |
+| `USER_ENABLE` | Reativação (ex.: retorno de férias; ver `docs/FLUXO_FERIAS_E_REATIVACAO.md`) |
+
+O endpoint `GET /api/status` retorna `useEventTypesFromDatabase` e, quando true, a lista `activeEventTypesFromDb` com os códigos ativos lidos do banco.
 
 ### Queries SQL
 
@@ -105,8 +138,7 @@ module.exports = {
     FROM VW_COLABORADORES_ALTERACOES_CARGO c
     WHERE c.DATA_ALTERACAO >= DATEADD(MINUTE, -10, GETDATE())
       AND c.STATUS = 'PENDENTE'
-  `,
-  ENABLED: true
+  `
 };
 ```
 
@@ -120,7 +152,7 @@ module.exports = {
 ### Sincronização Sênior → AD
 
 1. Cron job executa periodicamente (padrão: a cada 5 minutos)
-2. Carrega todas as queries habilitadas da pasta `src/queries/`
+2. Carrega todas as queries da pasta `src/queries/` (tipos ativos vêm de `AD_EVENT_TYPES`)
 3. Para cada query:
    - Executa SQL no banco Sênior
    - Para cada resultado:
@@ -138,10 +170,16 @@ module.exports = {
 
 ## API REST
 
-Se habilitada (`API_ENABLED=true`), a API expõe:
+Se habilitada (`API_ENABLED=true` ou variável não definida), a API expõe:
 
-- **Health Check**: `GET /api/health`
-- **Status**: `GET /api/status`
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/api/health` | **Health check**: verifica conectividade com os dois bancos. Retorna **200** se ambos ok, **503** se algum indisponível (útil para load balancer/Kubernetes). Corpo: `{ service, status, timestamp, connections: { adSync, senior } }`. |
+| GET | `/api/status` | **Status do serviço**: estado das conexões e configuração (crons, porta). Sempre retorna 200; corpo inclui `connections`, `config`. |
+
+Variáveis opcionais:
+- **LOG_LEVEL**: `debug`, `info`, `warn` ou `error` (padrão: `info`).
+- **CORS_ORIGINS**: origens permitidas separadas por vírgula (ex.: `http://localhost:3000,https://app.empresa.com`).
 
 ## Tabelas do Banco de Dados
 
@@ -160,7 +198,7 @@ Tabela compartilhada onde:
 ### Adicionar nova query SQL
 
 1. Criar arquivo `.js` em `src/queries/`
-2. Exportar objeto com `EVENT_TYPE_CODE`, `SQL`, `DESCRIPTION` e `ENABLED`
+2. Exportar objeto com `EVENT_TYPE_CODE`, `SQL` e `DESCRIPTION`
 3. A query deve retornar `USERNAME` e opcionalmente `MATRICULA` e `NEW_VALUE`
 4. Garantir que o `EVENT_TYPE_CODE` existe na tabela `AD_EVENT_TYPES`
 

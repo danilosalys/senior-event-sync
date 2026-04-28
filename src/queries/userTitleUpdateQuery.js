@@ -19,7 +19,6 @@ module.exports = {
     WHERE c.DATA_ALTERACAO >= DATEADD(MINUTE, -10, GETDATE())
       AND c.STATUS = 'PENDENTE'
       AND c.MATRICULA IS NOT NULL
-  `,
-  ENABLED: true
+  `
 };
 

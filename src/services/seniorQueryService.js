@@ -1,4 +1,4 @@
-const { pool, sql } = require('../config/seniorDbConfig');
+const seniorDbConfig = require('../config/seniorDbConfig');
 const logger = require('../utils/logger');
 
 /**
@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
  */
 async function executeQuery(querySQL) {
   try {
-    const request = new sql.Request(pool);
+    const request = new seniorDbConfig.sql.Request(seniorDbConfig.pool);
     const result = await request.query(querySQL);
     
     logger.debug(`Query executada com sucesso. ${result.recordset.length} registros retornados.`);
@@ -25,7 +25,7 @@ async function executeQuery(querySQL) {
  */
 async function testConnection() {
   try {
-    await pool.connect();
+    await seniorDbConfig.poolConnect;
     logger.info('Conexão com banco de dados Sênior estabelecida com sucesso.');
     return true;
   } catch (error) {

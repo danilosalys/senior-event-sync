@@ -1,22 +1,34 @@
+// Carregar .env primeiro (caminho explícito)
+const path = require('path');
+require('dotenv').config({ path: path.resolve(process.cwd(), '.env') });
+
+const { validateEnv } = require('./config/envValidator');
+try {
+  validateEnv();
+} catch (error) {
+  console.error('Erro de configuração:', error.message);
+  process.exit(1);
+}
+
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const dbConfig = require('./config/dbConfig');
 const seniorDbConfig = require('./config/seniorDbConfig');
 const configManager = require('./config/configManager');
 const statusApi = require('./api/statusApi');
 const seniorSyncController = require('./controllers/seniorSyncController');
+const queryLoaderService = require('./services/queryLoaderService');
 const cron = require('node-cron');
-const logger = require('./utils/logger');
+const logger = require('./utils/logger').child({ module: 'app' });
 
 const app = express();
 
-// Configurar CORS
+// CORS: origens via CORS_ORIGINS (separadas por vírgula) ou padrão localhost:3000
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim()).filter(Boolean)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000'];
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-  ],
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -28,6 +40,16 @@ app.use(express.json());
 if (configManager.getConfig().api.enableApi) {
   app.use('/api', statusApi);
 }
+
+// Middleware de erro global (4 args) — deve vir após as rotas
+app.use((err, req, res, next) => {
+  logger.error('Erro não tratado na API', err);
+  res.status(500).json({
+    service: 'senior-event-sync',
+    status: 'error',
+    error: process.env.NODE_ENV === 'production' ? 'Erro interno' : err.message
+  });
+});
 
 let isDatabaseConnected = false;
 let isSeniorDatabaseConnected = false;
@@ -54,14 +76,24 @@ function validateConfigOrExit() {
   }
 }
 
+/** Verifica conectividade com um pool (SELECT 1). */
+async function pingPool(pool, sql) {
+  try {
+    const req = new sql.Request(pool);
+    await req.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Verifica e reconecta pools se a conexão tiver caído (rede, timeout, SQL reiniciado). */
 async function checkAndReconnectPools() {
-  try {
-    const req = new dbConfig.sql.Request(dbConfig.pool);
-    await req.query('SELECT 1');
+  const adSyncOk = await pingPool(dbConfig.pool, dbConfig.sql);
+  if (adSyncOk) {
     isDatabaseConnected = true;
-  } catch (err) {
-    logger.warn('Pool AD_Sync indisponível, tentando reconectar...', err.message);
+  } else {
+    logger.warn('Pool AD_Sync indisponível, tentando reconectar...');
     try {
       dbConfig.recreateConnection();
       await dbConfig.poolConnect;
@@ -69,15 +101,15 @@ async function checkAndReconnectPools() {
       logger.info('Reconexão AD_Sync estabelecida.');
     } catch (err2) {
       isDatabaseConnected = false;
-      logger.error('Falha na reconexão AD_Sync.', err2.message);
+      logger.error('Falha na reconexão AD_Sync.', err2);
     }
   }
-  try {
-    const req = new seniorDbConfig.sql.Request(seniorDbConfig.pool);
-    await req.query('SELECT 1');
+
+  const seniorOk = await pingPool(seniorDbConfig.pool, seniorDbConfig.sql);
+  if (seniorOk) {
     isSeniorDatabaseConnected = true;
-  } catch (err) {
-    logger.warn('Pool Sênior indisponível, tentando reconectar...', err.message);
+  } else {
+    logger.warn('Pool Sênior indisponível, tentando reconectar...');
     try {
       seniorDbConfig.recreateConnection();
       await seniorDbConfig.poolConnect;
@@ -85,7 +117,7 @@ async function checkAndReconnectPools() {
       logger.info('Reconexão Sênior estabelecida.');
     } catch (err2) {
       isSeniorDatabaseConnected = false;
-      logger.error('Falha na reconexão Sênior.', err2.message);
+      logger.error('Falha na reconexão Sênior.', err2);
     }
   }
 }
@@ -160,7 +192,12 @@ async function startService() {
 
   // Inicializar conexões
   await initializeConnections();
-  
+
+  // Validar que EVENT_TYPE_CODE das queries existem em AD_EVENT_TYPES (apenas avisos)
+  queryLoaderService.validateQueriesEventTypes().catch((err) => {
+    logger.error('Validação de tipos de evento das queries', err);
+  });
+
   // Iniciar servidor da API (se habilitado)
   if (config.api.enableApi) {
     const PORT = config.api.port || 3001;
